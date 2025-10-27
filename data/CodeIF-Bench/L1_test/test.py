@@ -39,19 +39,19 @@ def test_completions(data_dict: dict) -> bool:
 
 
 test_path = "<your_path>"
-rate =0 
+throughput =0
 test_json = read_json(test_path,True)
 pass_result = 0
 for data in tqdm(test_json):
-    rate += data['rate']
+    throughput += data['throughput']
     if 'pass' in data:
         if data['pass']:
             pass_result+=1
-        
+
         continue
     idx = data["completions"][0].find('``')
     data["completions"][0] =  data["completions"][0][:idx-1] if idx != -1 else data["completions"][0]
-    
+
     data['test_code'] = ''
     if data['ins_type']!="Functionality Extension":
         for t in data['base_tests']:
@@ -68,4 +68,4 @@ for data in tqdm(test_json):
     else:
         data['pass'] = False
 print(f"pass@1: {pass_result/len(test_json)}")
-print(f"rate: {rate/len(test_json)}")
+print(f"throughput: {throughput/len(test_json)}")

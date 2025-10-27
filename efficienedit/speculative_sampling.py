@@ -14,25 +14,25 @@ def find_suffix_and_return_remaining(tensor_a, tensor_b, gamma):
     # Step 1: Check if gamma is valid
     if gamma <= 0 or gamma > len(tensor_a):
         return None  # Invalid gamma
-    
+
     # Extract the suffix of tensor_a
     suffix_a = tensor_a[-gamma:]
-    
+
     # Convert tensors to lists for easier handling (if needed)
     suffix_a_list = suffix_a.tolist()
     tensor_b_list = tensor_b.tolist()
-    
+
     # Step 2: Find the suffix in tensor_b
     len_suffix = len(suffix_a_list)
     len_b = len(tensor_b_list)
-    
+
     for i in range(len_b - len_suffix + 1):
         # Check if the current window matches the suffix
         if tensor_b_list[i:i+len_suffix] == suffix_a_list:
             # Step 3: Return the remaining part of tensor_b
             remaining = tensor_b[i+len_suffix:]
             return remaining
-    
+
     # No match found
     return None
 
@@ -58,7 +58,7 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
         past_key_values = outputs.past_key_values
         if temperature == 0 :
             logits = outputs.logits[:, -1, :]
-            idx_next = logits.argmax(dim=-1, keepdim=True)            
+            idx_next = logits.argmax(dim=-1, keepdim=True)
         else:
             last_p = norm_logits(outputs.logits[::, -1, :], temperature, top_k, top_p)
             idx_next = sample(last_p)
@@ -67,7 +67,7 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
         current_token = x[0][prompt_len:].flatten()
         eos_tokens = eos_token_id_tensor.flatten()
         if torch.isin(current_token, eos_tokens).any():
-            return x 
+            return x
     return x
 ###speculative_decoding###
 def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, eos_token_id_tensor : torch.Tensor,
@@ -76,9 +76,9 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
     """
     Google version Speculative Sampling.
     https://arxiv.org/pdf/2211.17192.pdf
-        
+
     Adapted with KV Cache Optimization.
-        
+
     Args:
         x (torch.Tensor): input sequence, (batch, prefix_seqlen), Note that the batch dim is always 1 now.
         approx_model (torch.nn.Module): approx model, the small one
@@ -94,16 +94,16 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
     """
     seq_len = prefix.shape[1]
     T = seq_len + max_len
-    
+
     assert prefix.shape[0] == 1, "input batch size must be 1"
 
     assert approx_model.device == target_model.device
-    
+
     device = target_model.device
-    
+
     approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p)
     target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
-    
+
     resample_count = 0
     target_sample_count = 0
     accepted_count = 0
@@ -112,12 +112,17 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
         # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
         prefix_len = prefix.shape[1]
 
+        # prefill for target and drafter
+        # b/c we pass in gamma, we also perform gamma decode steps with drafter too
         x = approx_model_cache.generate(prefix, gamma)
         _ = target_model_cache.generate(x, 1)
-        
-        
+
+
+        # decode
+        # try generating gamma draft tokens
         n = prefix_len + gamma - 1
         for i in range(gamma):
+            # greedy decoding since k=1
             current_top_k_tokens = torch.topk(target_model_cache._prob_history[:, prefix_len + i - 1, :], 1).indices
             candidate_top_k_tokens =  torch.topk(approx_model_cache._prob_history[:, prefix_len + i - 1, :], 1).indices
             if candidate_top_k_tokens[0][0] == current_top_k_tokens[0][0]:
@@ -128,11 +133,11 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
 
         assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
         prefix = x[:, :n + 1]
-        
+
         approx_model_cache.rollback(n+1)
-        
+
         assert approx_model_cache._prob_history.shape[-2] <= n + 1, f"approx_model prob list shape {approx_model_cache._prob_history.shape}, n {n}"
-        
+
         if n < prefix_len + gamma - 1:
             t = torch.argmax(target_model_cache._prob_history[:, n, :], dim=-1).unsqueeze(0)
             resample_count += 1
@@ -143,19 +148,19 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
             t = torch.argmax(target_model_cache._prob_history[:, n, :], dim=-1).unsqueeze(0)
             target_sample_count += 1
             target_model_cache.rollback(n+2)
-        
+
         prefix = torch.cat((prefix, t), dim=1)
         current_token = prefix[0][prompt_len:].flatten()
         eos_tokens = eos_token_id_tensor.flatten()
         if torch.isin(current_token, eos_tokens).any():
-            return prefix 
+            return prefix
     return prefix
 
 ###efficient_edit###
 @torch.no_grad()
-def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.Tensor, target_model : torch.nn.Module, draft_model: torch.nn.Module,eos_token_id_tensor: torch.Tensor, 
+def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.Tensor, target_model : torch.nn.Module, draft_model: torch.nn.Module,eos_token_id_tensor: torch.Tensor,
                          max_len : int , policy, edit_gamma: int=7, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
-    
+
     end_state = False
     # question len
     prompt_len = prefix.shape[1]
@@ -164,18 +169,18 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
     T = prompt_len + max_len
     # input batch size must be 1
     assert prefix.shape[0] == 1, "input batch size must be 1"
-    
+
     device = target_model.device
     target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
     draft_model_cache = KVCacheModel(draft_model, temperature, top_k, top_p)
-    
+
     target_generate = 0
     edit_generate = 0
-    
+
     while prefix.shape[1] <= T :
         # init count #
         draft_accepted_count = 0
-        edit_accepted_count = 0 
+        edit_accepted_count = 0
         if precode.shape[1]>0:
             prefix_len = prefix.shape[1]
             prefix = torch.cat((prefix, precode), dim=1)
@@ -262,7 +267,7 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
                         n = prefix_len + i - 1
                         break
 
-        
+
             assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
             prefix = x[:, :n + 1]
             draft_model_cache.rollback(n+1)
@@ -289,5 +294,5 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
 
         if end_state:
             return prefix
-            
+
     return prefix

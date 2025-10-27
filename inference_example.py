@@ -17,13 +17,19 @@ torch.manual_seed(520)
 from argparse import ArgumentParser
 from pathlib import Path
 from efficienedit.speculative_sampling import autoregressive_sampling,speculative_sampling_original,efficient_edit_speculative_sampling
+
+from icecream import install
+install()
+
 def get_parser():
     parser = ArgumentParser()
-    parser.add_argument('--output_file', type=Path)
-    parser.add_argument('--data_file', type=Path)
+    parser.add_argument("--approach", type=str, choices=["AR", "SD", "EE"], default="AR")
+    parser.add_argument("--num-samples", type=int, default=None)
+    parser.add_argument('--output_dir', type=Path, default="result")
+    parser.add_argument('--data_file', type=Path, default="data/CanItEdit/test.jsonl")
     parser.add_argument('--draft_lora_path', type=Path, default=None)
-    parser.add_argument('--draft_model', type=Path)
-    parser.add_argument('--target_model', type=Path)
+    parser.add_argument('--draft_model', type=Path, default="Qwen/Qwen2.5-Coder-32B-Instruct")
+    parser.add_argument('--target_model', type=Path, default="Qwen/Qwen2.5-Coder-7B-Instruct")
     return parser.parse_args()
 
 def code_edit_prompt(instruction,code_before):
@@ -50,39 +56,40 @@ def speculative_sampling_inference(target_model, draft_model, eos_token_id_tenso
                 target_model = target_model,
                 eos_token_id_tensor = eos_token_id_tensor,
                 max_len=1500,
-                temperature = temperature, 
-                top_k= top_k, 
+                temperature = temperature,
+                top_k= top_k,
                 top_p = top_p)
     time = t.elapsed
     tokens = outputs.shape[-1] - input_ids.shape[-1]
     result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-    return {"time":time, "tokens":tokens, "rate": tokens/time,"result":result}
+    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
 
 def efficient_edit_inference(target_model, draft_model, code_before, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
     precode = tokenizer.encode(code_before, add_special_tokens=False, return_tensors="pt").to(target_model.device)
     with contexttimer.Timer() as t:
         with torch.no_grad():
             outputs = efficient_edit_speculative_sampling(
-                prefix = input_ids, 
-                precode = precode, 
+                prefix = input_ids,
+                precode = precode,
                 target_model = target_model,
                 draft_model = draft_model,
                 eos_token_id_tensor = eos_token_id_tensor,
                 max_len=1500 ,
                 policy = "greedy",
-                temperature = temperature, 
-                top_k= top_k, 
+                temperature = temperature,
+                top_k= top_k,
                 top_p = top_p)
     time = t.elapsed
     tokens = outputs.shape[-1] - input_ids.shape[-1]
     result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-    return {"time":time, "tokens":tokens, "rate": tokens/time,"result":result}
+    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
+
 def autoregressive_inference(model, input_ids, max_token, eos_token_id_tensor, temperature= 0.2, top_p = 0.95,top_k = 5):
     with contexttimer.Timer() as t:
         with torch.no_grad():
             ####kv cache###
             outputs = autoregressive_sampling(
-                x = input_ids, 
+                x = input_ids,
                 model = model,
                 N = max_token ,
                 eos_token_id_tensor = eos_token_id_tensor,
@@ -93,16 +100,17 @@ def autoregressive_inference(model, input_ids, max_token, eos_token_id_tensor, t
     time = t.elapsed
     tokens = outputs.shape[-1] - input_ids.shape[-1]
     result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
-    return {"time":time, "tokens":tokens, "rate": tokens/time,"result":result}
+    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
 
 if __name__ == '__main__':
     args = get_parser()
-    
+
     tokenizer = AutoTokenizer.from_pretrained(args.target_model)
     target_model = AutoModelForCausalLM.from_pretrained(args.target_model,torch_dtype=torch.float16,device_map="auto")
     draft_model = AutoModelForCausalLM.from_pretrained(args.draft_model, torch_dtype=torch.float16,device_map="auto")
 
     if 'Qwen' in str(args.target_model):
+        # these tokens are things like ``\n, ```, ```\\n, etc.
         eos_token_id_tensor = torch.tensor([84274,73594,9902,13874,41233,54275,151645]).to(target_model.device)
     else:
         eos_token_id_tensor = torch.tensor([10252,32021]).to(target_model.device)
@@ -118,27 +126,30 @@ if __name__ == '__main__':
     data = read_json(args.data_file,False)
     result = []
 
-    data = data[:1]
+    if args.num_samples: data = data[:args.num_samples]
     for item in tqdm(data):
         ####canitedit####
         prompt = code_edit_prompt(item['instruction_lazy'],item['before'])
         code_before = item['before']+'\n'
         input_ids = tokenizer.encode(prompt, return_tensors="pt").to(target_model.device)
 
-        ###AR###
-        # _ = autoregressive_inference(target_model, input_ids,2048, eos_token_id_tensor, temperature=0)
-        ###SD###
-        # _ = speculative_sampling_inference(target_model = target_model,draft_model = draft_model, eos_token_id_tensor = eos_token_id_tensor, input_ids = input_ids,max_token = 4096, temperature=0)
-        ###efficientedit###
-        # _ = efficient_edit_inference(target_model = target_model,draft_model = draft_model, code_before= code_before, eos_token_id_tensor = eos_token_id_tensor, input_ids = input_ids,max_token = 4096, temperature=0)
+        if args.approach == "AR":
+            output = autoregressive_inference(target_model, input_ids,2048, eos_token_id_tensor, temperature=0)
+        elif args.approach == "SD":
+            output = speculative_sampling_inference(target_model = target_model,draft_model = draft_model, eos_token_id_tensor = eos_token_id_tensor, input_ids = input_ids,max_token = 4096, temperature=0)
+        elif args.approach == "EE":
+            output = efficient_edit_inference(target_model = target_model,draft_model = draft_model, code_before= code_before, eos_token_id_tensor = eos_token_id_tensor, input_ids = input_ids,max_token = 4096, temperature=0)
+        else:
+            raise ValueError(f"invalid {args.approach=}")
 
 
-        item['completions'] = [_['result']]
-        item['time'] = _['time']
-        item['tokens'] = _['tokens']
-        item['rate'] = _['rate']
-        # item['draft_rate'] = _['draft_rate']
+        item['completions'] = [output['result']]
+        item['time'] = output['time']
+        item['tokens'] = output['tokens']
+        item['throughput'] = output['throughput']
+        # item['draft_rate'] = output['draft_rate']
         if 'edit_eval' in str(args.data_file):
-            item['output'] = [_['result']]
+            item['output'] = [output['result']]
         result.append(item)
-        save_json(args.output_file,result)
+        output_path = args.output_dir / f"result_{args.approach}.jsonl"
+        save_json(output_path,result)
