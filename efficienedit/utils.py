@@ -64,5 +64,32 @@ def max_fn(x):
         norm(max (x, 0))
     """
     x_max = torch.where(x > 0, x, torch.zeros_like(x))
-    x_max_sum = torch.sum(x_max, dim=1, keepdim=True) 
+    x_max_sum = torch.sum(x_max, dim=1, keepdim=True)
     return x_max / x_max_sum
+
+
+class Timer:
+    def __init__(self):
+        self.prefill_times = []
+        self.decode_times = []
+    def start(self):
+        self.start_time = torch.cuda.Event(enable_timing=True)
+        self.end_time = torch.cuda.Event(enable_timing=True)
+        self.start_time.record()
+    def stop_prefill(self):
+        self.end_time.record()
+        torch.cuda.synchronize()
+        self.prefill_times.append(self.start_time.elapsed_time(self.end_time) / 1000) # convert to seconds
+    def stop_decode(self):
+        self.end_time.record()
+        torch.cuda.synchronize()
+        self.decode_times.append(self.start_time.elapsed_time(self.end_time) / 1000) # convert to seconds
+    def __repr__(self):
+        total_prefill = sum(self.prefill_times)
+        total_decode = sum(self.decode_times)
+        return f"<Timer> Prefill time: {total_prefill:.2f} ms, Decode time: {total_decode:.2f} ms"
+    def to_dict(self):
+        total_prefill = sum(self.prefill_times)
+        total_decode = sum(self.decode_times)
+        total_time = total_prefill + total_decode
+        return {"total_time": total_time, "prefill_time": total_prefill, "decode_time": total_decode}

@@ -1,25 +1,20 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2,3,4.5"
-import torch
-import argparse
-import contexttimer
-from colorama import Fore, Style
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import json
-from  tqdm import tqdm
-from util import (
-    read_json,
-    save_json
-)
-from peft import PeftModel, LoraConfig, get_peft_model
-import re
-torch.manual_seed(520)
 from argparse import ArgumentParser
 from pathlib import Path
+
+import torch
+import contexttimer
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from tqdm import tqdm
+from peft import PeftModel
+from util import read_json, save_json
+from efficienedit.utils import Timer
 from efficienedit.speculative_sampling import autoregressive_sampling,speculative_sampling_original,efficient_edit_speculative_sampling
 
 from icecream import install
 install()
+
+torch.manual_seed(520)
+
 
 def get_parser():
     parser = ArgumentParser()
@@ -48,21 +43,24 @@ You are an expert code editor. Please modify the given ##Code File according to 
     return prompt
 
 def speculative_sampling_inference(target_model, draft_model, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
-    with contexttimer.Timer() as t:
-        with torch.no_grad():
-            outputs = speculative_sampling_original(
-                prefix = input_ids,
-                approx_model = draft_model,
-                target_model = target_model,
-                eos_token_id_tensor = eos_token_id_tensor,
-                max_len=1500,
-                temperature = temperature,
-                top_k= top_k,
-                top_p = top_p)
-    time = t.elapsed
-    tokens = outputs.shape[-1] - input_ids.shape[-1]
-    result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
+    timer = Timer()
+    with torch.no_grad():
+        outputs = speculative_sampling_original(
+            prefix = input_ids,
+            approx_model = draft_model,
+            target_model = target_model,
+            eos_token_id_tensor = eos_token_id_tensor,
+            max_len=1500,
+            temperature = temperature,
+            top_k= top_k,
+            top_p = top_p,
+            timer=timer,
+            )
+    new_tokens = outputs.shape[-1] - input_ids.shape[-1]
+    completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
+    timer_dict = timer.to_dict()
+    throughput = {f"{name.split('_')[0]} throughput": new_tokens/time for name, time in timer_dict.items()}
+    return timer_dict | throughput | {"new_tokens":new_tokens, "completions":completions}
 
 def efficient_edit_inference(target_model, draft_model, code_before, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
     precode = tokenizer.encode(code_before, add_special_tokens=False, return_tensors="pt").to(target_model.device)
@@ -85,22 +83,23 @@ def efficient_edit_inference(target_model, draft_model, code_before, eos_token_i
     return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
 
 def autoregressive_inference(model, input_ids, max_token, eos_token_id_tensor, temperature= 0.2, top_p = 0.95,top_k = 5):
-    with contexttimer.Timer() as t:
-        with torch.no_grad():
-            ####kv cache###
-            outputs = autoregressive_sampling(
-                x = input_ids,
-                model = model,
-                N = max_token ,
-                eos_token_id_tensor = eos_token_id_tensor,
-                temperature = temperature,
-                top_k = top_k,
-                top_p = top_p)
-
-    time = t.elapsed
-    tokens = outputs.shape[-1] - input_ids.shape[-1]
-    result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
-    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
+    timer = Timer()
+    with torch.no_grad():
+        outputs = autoregressive_sampling(
+            x = input_ids,
+            model = model,
+            N = max_token ,
+            eos_token_id_tensor = eos_token_id_tensor,
+            temperature = temperature,
+            top_k = top_k,
+            top_p = top_p,
+            timer=timer,
+            )
+    new_tokens = outputs.shape[-1] - input_ids.shape[-1]
+    completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
+    timer_dict = timer.to_dict()
+    throughput = {f"{name.split('_')[0]} throughput": new_tokens/time for name, time in timer_dict.items()}
+    return timer_dict | throughput | {"new_tokens":new_tokens, "completions":completions}
 
 if __name__ == '__main__':
     args = get_parser()
@@ -132,6 +131,7 @@ if __name__ == '__main__':
         prompt = code_edit_prompt(item['instruction_lazy'],item['before'])
         code_before = item['before']+'\n'
         input_ids = tokenizer.encode(prompt, return_tensors="pt").to(target_model.device)
+        ic(item, prompt, code_before)
 
         if args.approach == "AR":
             output = autoregressive_inference(target_model, input_ids,2048, eos_token_id_tensor, temperature=0)
@@ -141,15 +141,11 @@ if __name__ == '__main__':
             output = efficient_edit_inference(target_model = target_model,draft_model = draft_model, code_before= code_before, eos_token_id_tensor = eos_token_id_tensor, input_ids = input_ids,max_token = 4096, temperature=0)
         else:
             raise ValueError(f"invalid {args.approach=}")
+        ic(output)
 
-
-        item['completions'] = [output['result']]
-        item['time'] = output['time']
-        item['tokens'] = output['tokens']
-        item['throughput'] = output['throughput']
         # item['draft_rate'] = output['draft_rate']
         if 'edit_eval' in str(args.data_file):
             item['output'] = [output['result']]
-        result.append(item)
+        result.append(item | output)
         output_path = args.output_dir / f"result_{args.approach}.jsonl"
         save_json(output_path,result)

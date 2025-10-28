@@ -1,12 +1,9 @@
 import torch
 from tqdm import tqdm
 import torch
-import re
 from efficienedit.kvcache_model import KVCacheModel
-from efficienedit.utils import norm_logits, sample, max_fn
-from typing import Literal
+from efficienedit.utils import norm_logits, sample, Timer
 
-from transformers import AutoTokenizer
 
 
 ###prefix match###
@@ -39,7 +36,7 @@ def find_suffix_and_return_remaining(tensor_a, tensor_b, gamma):
 ###autoregressive_decoding###
 @torch.no_grad()
 def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, eos_token_id_tensor : torch.Tensor,
-                            temperature : float = 1, top_k : int = 0, top_p : float = 0):
+                            temperature : float = 1, top_k : int = 0, top_p : float = 0, timer:None|Timer=None):
     n = len(x)
     T = len(x) + N
     count = 0
@@ -51,9 +48,13 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
             last_ids = x[:, -1]
             if last_ids.dim() == 1:
                 last_ids = torch.unsqueeze(last_ids, 0)
+            if timer: timer.start()
             outputs = model(last_ids, past_key_values = past_key_values, use_cache = True)
+            if timer: timer.stop_decode()
         else:
+            if timer: timer.start()
             outputs = model(x)
+            if timer: timer.stop_prefill()
         last_p = norm_logits(outputs.logits[::, -1, :], temperature, top_k, top_p)
         past_key_values = outputs.past_key_values
         if temperature == 0 :
@@ -72,7 +73,7 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
 ###speculative_decoding###
 def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, eos_token_id_tensor : torch.Tensor,
                          max_len : int = 2048 , gamma : int = 7,
-                         temperature : float = 0, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+                         temperature : float = 0, top_k : int = 0, top_p : float = 0, timer:None|Timer=None) -> torch.Tensor:
     """
     Google version Speculative Sampling.
     https://arxiv.org/pdf/2211.17192.pdf
@@ -107,7 +108,7 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
     resample_count = 0
     target_sample_count = 0
     accepted_count = 0
-    prompt_len =  prefix.shape[1]
+    prompt_len = prefix.shape[1]
     while prefix.shape[1] < T:
         # q = M_q[prefix + x_0, x_1, .., x_(gamma-2)]
         prefix_len = prefix.shape[1]
@@ -159,7 +160,7 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
 ###efficient_edit###
 @torch.no_grad()
 def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.Tensor, target_model : torch.nn.Module, draft_model: torch.nn.Module,eos_token_id_tensor: torch.Tensor,
-                         max_len : int , policy, edit_gamma: int=7, temperature : float = 1, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+                         max_len : int , policy, edit_gamma: int=7, temperature : float = 1, top_k : int = 0, top_p : float = 0, timer:None|Timer=None) -> torch.Tensor:
 
     end_state = False
     # question len
