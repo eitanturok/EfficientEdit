@@ -1,3 +1,4 @@
+from collections import defaultdict
 import torch
 from torch.nn import functional as F
 
@@ -70,26 +71,48 @@ def max_fn(x):
 
 class Timer:
     def __init__(self):
-        self.prefill_times = []
-        self.decode_times = []
-    def start(self):
-        self.start_time = torch.cuda.Event(enable_timing=True)
-        self.end_time = torch.cuda.Event(enable_timing=True)
-        self.start_time.record()
-    def stop_prefill(self):
-        self.end_time.record()
-        torch.cuda.synchronize()
-        self.prefill_times.append(self.start_time.elapsed_time(self.end_time) / 1000) # convert to seconds
-    def stop_decode(self):
-        self.end_time.record()
-        torch.cuda.synchronize()
-        self.decode_times.append(self.start_time.elapsed_time(self.end_time) / 1000) # convert to seconds
+        self.times = defaultdict(list)
+        self.n_tokens = defaultdict(int)
+
+    def start(self, key):
+        torch.cuda.synchronize()  # Ensure previous ops are done
+        start_time = torch.cuda.Event(enable_timing=True)
+        end_time = torch.cuda.Event(enable_timing=True)
+        start_time.record()
+        self.times[key].append((start_time, end_time))
+
+    def stop(self, key, n_tokens:int=0):
+        start_time, end_time = self.times[key][-1]
+        end_time.record()
+        torch.cuda.synchronize()  # Wait for all ops to complete
+        elapsed_time = start_time.elapsed_time(end_time) / 1000  # convert to seconds
+        self.times[key][-1] = (elapsed_time)
+        if n_tokens: self.n_tokens[key] += n_tokens
+
     def __repr__(self):
-        total_prefill = sum(self.prefill_times)
-        total_decode = sum(self.decode_times)
-        return f"<Timer> Prefill time: {total_prefill:.2f} ms, Decode time: {total_decode:.2f} ms"
+        result = []
+        for name, times in self.times.items():
+            # Filter out only the completed timings
+            completed = [t for t in times if isinstance(t, float)]
+            if completed:
+                result.append(f"{name}: {sum(completed):.4f}s")
+        return ', '.join(result)
+
     def to_dict(self):
-        total_prefill = sum(self.prefill_times)
-        total_decode = sum(self.decode_times)
-        total_time = total_prefill + total_decode
-        return {"total_time": total_time, "prefill_time": total_prefill, "decode_time": total_decode}
+        result = {}
+        total_time, total_n_tokens = 0.0, 0
+        for name, times in self.times.items():
+            # Filter out only the float values (completed timings)
+            completed_times = [t for t in times if isinstance(t, float)]
+            if completed_times:
+                result[f"time_{name}"] = sum(completed_times)
+                if "_forward" not in name:
+                    result[f"num_forwards_{name}"] = len(completed_times)
+                    result[f"num_tokens_{name}"] = self.n_tokens[name]
+                    result[f"throughput_{name}"] = self.n_tokens[name] / sum(completed_times) if sum(completed_times) > 0 else 0.0
+                    total_time += sum(completed_times)
+                    total_n_tokens += self.n_tokens[name]
+        result[f"time"] = total_time
+        result[f"n_tokens"] = total_n_tokens
+        result[f"throughput"] = total_n_tokens / total_time if total_time > 0 else 0.0
+        return result

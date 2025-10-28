@@ -13,11 +13,13 @@
             "libraries": [],
             "topic": "Language"
         },
-        "completions": [
-            "class CSVParser:\n    def __init__(self, csv: str):\n        self.csv = csv\n\n    def contents(self) -> list[list[str]]:\n        lines = self.csv.split(\"\\n\")\n        output = []\n        for line in lines:\n            output.append(line.split(\",\"))\n        return output\n\n    def header(self) -> list[str]:\n        return self.contents()[0]\n```"
-        ],
-        "time": 14.109830612000223,
-        "tokens": 78,
-        "throughput": 5.528060693631717
+        "total_time": 2.611969959259033,
+        "prefill_time": 0.6057184448242188,
+        "decode_time": 2.006251514434814,
+        "total throughput": 29.86251802916108,
+        "prefill throughput": 128.77270069369578,
+        "decode throughput": 38.87847532515063,
+        "new_tokens": 78,
+        "completions": "class CSVParser:\n    def __init__(self, csv: str):\n        self.csv = csv\n\n    def contents(self) -> list[list[str]]:\n        lines = self.csv.split(\"\\n\")\n        output = []\n        for line in lines:\n            output.append(line.split(\",\"))\n        return output\n\n    def header(self) -> list[str]:\n        return self.contents()[0]\n```"
     }
 ]

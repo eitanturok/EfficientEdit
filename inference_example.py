@@ -43,9 +43,8 @@ You are an expert code editor. Please modify the given ##Code File according to 
     return prompt
 
 def speculative_sampling_inference(target_model, draft_model, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
-    timer = Timer()
     with torch.no_grad():
-        outputs = speculative_sampling_original(
+        outputs, drafter_timer, target_timer = speculative_sampling_original(
             prefix = input_ids,
             approx_model = draft_model,
             target_model = target_model,
@@ -54,13 +53,13 @@ def speculative_sampling_inference(target_model, draft_model, eos_token_id_tenso
             temperature = temperature,
             top_k= top_k,
             top_p = top_p,
-            timer=timer,
             )
-    new_tokens = outputs.shape[-1] - input_ids.shape[-1]
+    num_generated_tokens = outputs.shape[-1] - input_ids.shape[-1]
     completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
-    timer_dict = timer.to_dict()
-    throughput = {f"{name.split('_')[0]} throughput": new_tokens/time for name, time in timer_dict.items()}
-    return timer_dict | throughput | {"new_tokens":new_tokens, "completions":completions}
+    drafter_timer_dict, target_timer_dict = {f"{k}_drafter": v for k, v in drafter_timer.to_dict().items()}, {f"{k}_target": v for k, v in target_timer.to_dict().items()}
+    total_dict = {f"total_{name}": drafter_timer_dict[f"{name}_drafter"] + target_timer_dict[f"{name}_target"] for name in ["n_tokens", "throughput", "time"]}
+    ret = drafter_timer_dict | target_timer_dict | total_dict | {"num_generated_tokens":num_generated_tokens, "completions":completions}
+    return dict(sorted(ret.items()))
 
 def efficient_edit_inference(target_model, draft_model, code_before, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
     precode = tokenizer.encode(code_before, add_special_tokens=False, return_tensors="pt").to(target_model.device)
@@ -131,7 +130,6 @@ if __name__ == '__main__':
         prompt = code_edit_prompt(item['instruction_lazy'],item['before'])
         code_before = item['before']+'\n'
         input_ids = tokenizer.encode(prompt, return_tensors="pt").to(target_model.device)
-        ic(item, prompt, code_before)
 
         if args.approach == "AR":
             output = autoregressive_inference(target_model, input_ids,2048, eos_token_id_tensor, temperature=0)
