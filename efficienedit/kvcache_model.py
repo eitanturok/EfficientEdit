@@ -134,6 +134,5 @@ class KVCacheModel():
                 past_key_values_trimmed.append(kv_trimmed)
 
         self._past_key_values = past_key_values_trimmed
-        # self._prob_history = self._prob_history[:, :end_pos, :]
         self._prob_history = self._prob_history[:, :end_pos, :]
 

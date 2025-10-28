@@ -70,6 +70,29 @@ def autoregressive_sampling(x : torch.Tensor, model : torch.nn.Module, N : int, 
         if torch.isin(current_token, eos_tokens).any():
             return x
     return x
+
+def autoregressive_sampling2(x: torch.Tensor, target_model : torch.nn.Module, eos_token_id_tensor : torch.Tensor,
+                         max_len : int = 2048 , temperature : float = 0, top_k : int = 0, top_p : float = 0) -> torch.Tensor:
+
+    seq_len = x.shape[1]
+
+    # assert x.shape[0] == 1, "input batch size must be 1"
+
+    target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
+
+    prompt_len = x.shape[1]
+    while x.shape[1] < seq_len + max_len:
+        x = target_model_cache.generate(x, 1)
+        ic(x.shape)
+
+        current_token = x[:, -1:].flatten()
+        eos_tokens = eos_token_id_tensor.flatten()
+        ic(current_token, eos_tokens)
+        if torch.isin(current_token, eos_tokens).any():
+            return x, target_model_cache.timer
+    return x, target_model_cache.timer
+
+
 ###speculative_decoding###
 def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn.Module, target_model : torch.nn.Module, eos_token_id_tensor : torch.Tensor,
                          max_len : int = 2048 , gamma : int = 7,
@@ -118,7 +141,6 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
         x = approx_model_cache.generate(prefix, gamma)
         _ = target_model_cache.generate(x, 1)
 
-        # decode
         # try generating gamma draft tokens
         n = prefix_len + gamma - 1
         for i in range(gamma):

@@ -114,5 +114,5 @@ class Timer:
                     total_n_tokens += self.n_tokens[name]
         result[f"time"] = total_time
         result[f"n_tokens"] = total_n_tokens
-        result[f"throughput"] = total_n_tokens / total_time if total_time > 0 else 0.0
+        result[f"throughput_total"] = total_n_tokens / total_time if total_time > 0 else 0.0
         return result
