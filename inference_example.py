@@ -8,7 +8,7 @@ from tqdm import tqdm
 from peft import PeftModel
 from util import read_json, save_json
 from efficienedit.utils import Timer
-from efficienedit.speculative_sampling import autoregressive_sampling,speculative_sampling_original,efficient_edit_speculative_sampling, autoregressive_sampling2
+from efficienedit.speculative_sampling import autoregressive_sampling, speculative_sampling_original, efficient_edit_speculative_sampling
 
 from icecream import install
 install()
@@ -20,11 +20,11 @@ def get_parser():
     parser = ArgumentParser()
     parser.add_argument("--approach", type=str, choices=["AR", "SD", "EE"], default="AR")
     parser.add_argument("--num-samples", type=int, default=None)
-    parser.add_argument('--output_dir', type=Path, default="result")
-    parser.add_argument('--data_file', type=Path, default="data/CanItEdit/test.jsonl")
-    parser.add_argument('--draft_lora_path', type=Path, default=None)
-    parser.add_argument('--draft_model', type=Path, default="Qwen/Qwen2.5-Coder-32B-Instruct")
-    parser.add_argument('--target_model', type=Path, default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    parser.add_argument('--output-dir', type=Path, default="result")
+    parser.add_argument('--data-file', type=Path, default="data/CanItEdit/test.jsonl")
+    parser.add_argument('--draft-lora-path', type=Path, default=None)
+    parser.add_argument('--draft-model', type=Path, default="Qwen/Qwen2.5-Coder-32B-Instruct")
+    parser.add_argument('--target-model', type=Path, default="Qwen/Qwen2.5-Coder-7B-Instruct")
     return parser.parse_args()
 
 def code_edit_prompt(instruction,code_before):
@@ -57,7 +57,7 @@ def speculative_sampling_inference(target_model, draft_model, eos_token_id_tenso
     num_generated_tokens = outputs.shape[-1] - input_ids.shape[-1]
     completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
     drafter_timer_dict, target_timer_dict = {f"{k}_drafter": v for k, v in drafter_timer.to_dict().items()}, {f"{k}_target": v for k, v in target_timer.to_dict().items()}
-    total_dict = {f"total_{name}": drafter_timer_dict[f"{name}_drafter"] + target_timer_dict[f"{name}_target"] for name in ["n_tokens", "throughput", "time"]}
+    total_dict = {f"total_{name}": drafter_timer_dict[f"{name}_drafter"] + target_timer_dict[f"{name}_target"] for name in ["n_tokens", "throughput_total", "time"]}
     ret = drafter_timer_dict | target_timer_dict | total_dict | {"num_generated_tokens":num_generated_tokens}
     return {"stats": dict(sorted(ret.items()))} | {"completions": completions}
 
@@ -83,7 +83,7 @@ def efficient_edit_inference(target_model, draft_model, code_before, eos_token_i
 
 def autoregressive_inference(model, input_ids, max_token, eos_token_id_tensor, temperature= 0.2, top_p = 0.95,top_k = 5):
     with torch.no_grad():
-        outputs, target_timer = autoregressive_sampling2(input_ids, model, eos_token_id_tensor,  max_token, temperature, top_k, top_p)
+        outputs, target_timer = autoregressive_sampling(input_ids, model, eos_token_id_tensor,  max_token, temperature, top_k, top_p)
     num_generated_tokens = outputs.shape[-1] - input_ids.shape[-1]
     completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
     target_timer_dict = {f"{k}_target": v for k, v in target_timer.to_dict().items()}
