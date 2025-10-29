@@ -63,23 +63,24 @@ def speculative_sampling_inference(target_model, draft_model, eos_token_id_tenso
 
 def efficient_edit_inference(target_model, draft_model, code_before, eos_token_id_tensor, input_ids , max_token = 4096, temperature= 0.2, top_p = 0.95,top_k = 5):
     precode = tokenizer.encode(code_before, add_special_tokens=False, return_tensors="pt").to(target_model.device)
-    with contexttimer.Timer() as t:
-        with torch.no_grad():
-            outputs = efficient_edit_speculative_sampling(
-                prefix = input_ids,
-                precode = precode,
-                target_model = target_model,
-                draft_model = draft_model,
-                eos_token_id_tensor = eos_token_id_tensor,
-                max_len=1500 ,
-                policy = "greedy",
-                temperature = temperature,
-                top_k= top_k,
-                top_p = top_p)
-    time = t.elapsed
-    tokens = outputs.shape[-1] - input_ids.shape[-1]
-    result = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=True)
-    return {"time":time, "tokens":tokens, "throughput": tokens/time,"result":result}
+    with torch.no_grad():
+        outputs, drafter_timer, target_timer = efficient_edit_speculative_sampling(
+            prefix = input_ids,
+            precode = precode,
+            target_model = target_model,
+            draft_model = draft_model,
+            eos_token_id_tensor = eos_token_id_tensor,
+            max_len=1500 ,
+            policy = "greedy",
+            temperature = temperature,
+            top_k= top_k,
+            top_p = top_p)
+    num_generated_tokens = outputs.shape[-1] - input_ids.shape[-1]
+    completions = tokenizer.decode(outputs[0][len(input_ids[0]):], skip_special_tokens=False)
+    drafter_timer_dict, target_timer_dict = {f"{k}_drafter": v for k, v in drafter_timer.to_dict().items()}, {f"{k}_target": v for k, v in target_timer.to_dict().items()}
+    total_dict = {f"total_{name}": drafter_timer_dict[f"{name}_drafter"] + target_timer_dict[f"{name}_target"] for name in ["n_tokens", "throughput_total", "time"]}
+    ret = drafter_timer_dict | target_timer_dict | total_dict | {"num_generated_tokens":num_generated_tokens}
+    return {"stats": dict(sorted(ret.items()))} | {"completions": completions}
 
 def autoregressive_inference(model, input_ids, max_token, eos_token_id_tensor, temperature= 0.2, top_p = 0.95,top_k = 5):
     with torch.no_grad():

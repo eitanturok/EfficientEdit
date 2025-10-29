@@ -215,7 +215,7 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
                 else:
                     n = prefix_len + i - 1
                     break
-            print(draft_accepted_count,precode.shape[1])
+            print(f'{draft_accepted_count=}, {precode.shape[1]=}')
 
             prefix = _ [:, :n+1]
             if n < prefix_len + gamma - 1:
@@ -233,7 +233,7 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
             if torch.isin(current_token, eos_tokens).any():
                 end_state = True
             if end_state:
-                return temp_prefix
+                return temp_prefix, target_model_cache.timer, draft_model_cache.timer
 
         ### edit postion ###
         edit_gamma = edit_gamma
@@ -314,6 +314,6 @@ def efficient_edit_speculative_sampling(prefix : torch.Tensor, precode : torch.T
                 break
 
         if end_state:
-            return prefix
+            return prefix, target_model_cache.timer, draft_model_cache.timer
 
-    return prefix
+    return prefix, target_model_cache.timer, draft_model_cache.timer

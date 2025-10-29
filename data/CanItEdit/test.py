@@ -40,7 +40,6 @@ def test_completions(data_dict: dict) -> bool:
 
 def main(args):
     test_json = read_json(args.output_path,True)
-    ic(test_json)
     pass_result = 0
     # throughput = 0
     for data in tqdm(test_json):
@@ -51,7 +50,6 @@ def main(args):
             continue
         idx = data["completions"].find('``')
         data["completions"] =  data["completions"][:idx-1] if idx != -1 else data["completions"]
-        ic(data["completions"])
 
         if test_completions(data)==True:
             pass_result+=1
