@@ -122,8 +122,6 @@ def speculative_sampling_original(prefix : torch.Tensor, approx_model : torch.nn
 
     assert approx_model.device == target_model.device
 
-    device = target_model.device
-
     approx_model_cache = KVCacheModel(approx_model, temperature, top_k, top_p)
     target_model_cache = KVCacheModel(target_model, temperature, top_k, top_p)
 

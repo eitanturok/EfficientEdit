@@ -1,0 +1,50 @@
+[
+    {
+        "id": 10,
+        "name": "csv_parser",
+        "full_name": "10_csv_parser",
+        "before": "class CSVParser:\n    def __init__(self, csv: str):\n        self.csv = csv\n\n    def contents(self) -> list[list[str]]:\n        lines = self.csv.split(\"\\n\")\n        output = []\n        for line in lines:\n            output.append(line.split(\",\"))\n        return output",
+        "after": "class CSVParser:\n    def __init__(self, csv: str):\n        self.csv = csv\n\n    def contents(self) -> list[list[str]]:\n        lines = self.csv.split(\"\\n\")\n        output = []\n        for line in lines:\n            output.append(line.split(\",\"))\n        return output\n\n    def header(self) -> list[str]:\n        lines = self.csv.split(\"\\n\")\n        return lines[0].strip().split(\",\")",
+        "tests": "### START TESTS ###\nif True:  # pragma: no cover\n    parser = CSVParser('''bim,boom,bam,bap\nduck,duck,goose,duck\n1,0,1,0''')\n\n    p2 = CSVParser('''''')\n    p3 = CSVParser('''thing''')\n    p4 = CSVParser('''thing1, thing2\na, a''')\n    p5 = CSVParser(''',\n,''')\n\n    assert parser.contents() == [[\"bim\", \"boom\", \"bam\", \"bap\"],\n                                 [\"duck\", \"duck\", \"goose\", \"duck\"],\n                                 [\"1\", \"0\", \"1\", \"0\"]]\n    assert parser.header() == [\"bim\", \"boom\", \"bam\", \"bap\"]\n    assert p2.contents() == [['']]\n    assert p2.header() == ['']\n    assert p3.contents() == [['thing']]\n    assert p3.header() == ['thing']\n    assert p4.contents() == [['thing1', ' thing2'], ['a', ' a']]\n    assert p4.header() == ['thing1', ' thing2']\n    assert p5.contents() == [['', ''], ['', '']]\n    assert p5.header() == ['', '']",
+        "instruction_descriptive": "Add a function called `header` which returns the first row of a csv file as a list of strings, where\nevery element in the list is a column in the row.",
+        "instruction_lazy": "Add a method called `header` which returns the header of a csv file as a list",
+        "taxonomy": {
+            "change_kind": "adaptive",
+            "libraries": [],
+            "topic": "Language"
+        },
+        "stats": {
+            "n_tokens_drafter": 221,
+            "n_tokens_target": 218,
+            "num_forwards_decode_drafter": 3,
+            "num_forwards_decode_target": 20,
+            "num_forwards_prefill_drafter": 1,
+            "num_forwards_prefill_target": 1,
+            "num_generated_tokens": 78,
+            "num_tokens_decode_drafter": 23,
+            "num_tokens_decode_target": 21,
+            "num_tokens_prefill_drafter": 198,
+            "num_tokens_prefill_target": 197,
+            "throughput_decode_drafter": 291.635161960631,
+            "throughput_decode_target": 23.48316539950125,
+            "throughput_prefill_drafter": 586.4026603329537,
+            "throughput_prefill_target": 3647.8497392161325,
+            "throughput_total_drafter": 530.589812805836,
+            "throughput_total_target": 229.8942565280317,
+            "time_decode_drafter": 0.07886566162109375,
+            "time_decode_forward_drafter": 0.07788931083679199,
+            "time_decode_forward_target": 0.8839359588623049,
+            "time_decode_target": 0.8942576370239257,
+            "time_drafter": 0.41651760864257814,
+            "time_prefill_drafter": 0.3376519470214844,
+            "time_prefill_forward_drafter": 0.33561886596679685,
+            "time_prefill_forward_target": 0.05201615905761719,
+            "time_prefill_target": 0.05400441741943359,
+            "time_target": 0.9482620544433593,
+            "total_n_tokens": 439,
+            "total_throughput_total": 760.4840693338676,
+            "total_time": 1.3647796630859375
+        },
+        "completions": "class CSVParser:\n    def __init__(self, csv: str):\n        self.csv = csv\n\n    def contents(self) -> list[list[str]]:\n        lines = self.csv.split(\"\\n\")\n        output = []\n        for line in lines:\n            output.append(line.split(\",\"))\n        return output\n\n    def header(self) -> list[str]:\n        return self.contents()[0]\n```"
+    }
+]

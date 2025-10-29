@@ -95,10 +95,6 @@ if __name__ == '__main__':
     args = get_parser()
 
     tokenizer = AutoTokenizer.from_pretrained(args.target_model)
-    # this is slow b/c it puts things on the CPU
-    # target_model = AutoModelForCausalLM.from_pretrained(args.target_model,torch_dtype=torch.float16,device_map="auto")
-    # draft_model = AutoModelForCausalLM.from_pretrained(args.draft_model, torch_dtype=torch.float16,device_map="auto")
-
     target_model = AutoModelForCausalLM.from_pretrained(args.target_model,torch_dtype=torch.float16).to("cuda")
     draft_model = AutoModelForCausalLM.from_pretrained(args.draft_model, torch_dtype=torch.float16).to("cuda")
 
